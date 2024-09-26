@@ -1,0 +1,121 @@
+---
+title: "F1 Rookie Age Analysis"
+date: "2024-07-25"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    social: menu
+    source_code: embed
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{R include=FALSE}
+library(ISLR)
+library(flexdashboard)
+library(shiny)
+library(tidyverse)
+library(randomForest)
+```
+
+```{R include=FALSE}
+status <- read.csv('./F1/Data/status.csv')
+sprint_results <- read.csv('./F1/Data/sprint_results.csv')
+seasons <- read.csv('./F1/Data/seasons.csv')
+results <- read.csv('./F1/Data/results.csv')
+races <- read.csv('./F1/Data/races.csv')
+qualifying <- read.csv('./F1/Data/qualifying.csv')
+pit_stops <- read.csv('./F1/Data/pit_stops.csv')
+lap_times <- read.csv('./F1/Data/lap_times.csv')
+drivers <- read.csv('./F1/Data/drivers.csv')
+driver_standings <- read.csv('./F1/Data/driver_standings.csv')
+constructors <- read.csv('./F1/Data/constructors.csv')
+constructor_standings <- read.csv('./F1/Data/constructor_standings.csv')
+constructor_results <- read.csv('./F1/Data/constructor_results.csv')
+circuits <- read.csv('./F1/Data/circuits.csv')
+
+# 데이터 전처리 및 결합
+driver_data <- drivers %>%
+  select(driverId, driverRef, number, code, forename, surname, dob, nationality) %>%
+  mutate(age = as.numeric(format(Sys.Date(), "%Y")) - as.numeric(substr(dob, 1, 4)))
+
+rookie_data <- results %>%
+  group_by(driverId) %>%
+  summarize(first_race = min(raceId)) %>%
+  left_join(drivers, by = "driverId") %>%
+  mutate(debut_age = as.numeric(format(Sys.Date(), "%Y")) - as.numeric(substr(dob, 1, 4)))
+
+performance_data <- results %>%
+  group_by(driverId) %>%
+  summarize(points = sum(points), races = n())
+
+combined_data <- rookie_data %>%
+  left_join(performance_data, by = "driverId")
+
+# 결측값 및 비정상 값 제거
+cleaned_data <- combined_data %>%
+  filter(!is.na(points) & !is.infinite(points) & !is.nan(points) & points > 0)
+
+```
+
+```{R echo=FALSE}
+names(cleaned_data)
+```
+
+## Inputs {.sidebar}
+```{R, echo = FALSE}
+inputPanel(
+  selectInput("xvar", "X-axis Variable:", choices=names(cleaned_data)),
+  selectInput("color", "Color Variable:", choices=names(cleaned_data))
+)
+```
+
+```{R include=FALSE}
+renderPlot({
+  ggplot(data = cleaned_data, aes_string(x = input$xvar, y = "points", color = input$color)) + 
+    geom_point() + 
+    geom_smooth() + 
+    labs(x = input$xvar, y = "Points", title = paste("Scatter plot of", input$xvar, "vs. Points"))
+})
+
+```
+
+
+```{R include=FALSE}
+server <- function(input, output) {
+  output$scatterPlot <- renderPlot({
+    ggplot(data = cleaned_data, aes_string(x = input$xvar, y = "points", color = input$color)) + 
+      geom_point() + 
+      geom_smooth() + 
+      labs(x = input$xvar, y = "Points", title = paste("Scatter plot of", input$xvar, "vs. Points"))
+  })
+}
+```
+
+```{R include=FALSE}
+# 선형 회귀 모델 1: 나이와 성적
+lm.fit1 <- lm(points ~ debut_age, data = cleaned_data)
+summary(lm.fit1)
+```
+
+```{R include=FALSE}
+# 모델 진단
+par(mfrow=c(2,2))
+plot(lm.fit1)
+```
+
+```{R include=FALSE}
+# 선형 회귀 모델 2: 나이, 레이스 수와 상호작용
+lm.fit2 <- lm(points ~ debut_age * races, data = cleaned_data)
+summary(lm.fit2)
+```
+
+```{R include=FALSE}
+# 랜덤 포레스트 모델
+model_rf <- randomForest(points ~ debut_age + races, data = cleaned_data)
+print(importance(model_rf))
+print(model_rf)
+```
